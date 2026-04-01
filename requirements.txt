@@ -1,0 +1,4 @@
+ray[default,serve]>=2.54.0
+fastapi
+torch
+transformers

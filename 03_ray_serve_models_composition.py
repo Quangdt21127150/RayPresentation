@@ -1,3 +1,5 @@
+import time
+
 import ray
 from ray import serve
 from pydantic import BaseModel
@@ -5,7 +7,7 @@ from transformers import pipeline
 from fastapi import FastAPI
 
 ray.init(ignore_reinit_error=True)
-serve.start(detached=True, http_options={"host": "127.0.0.1", "port": 8000})
+serve.start(detached=True, http_options={"host": "localhost", "port": 3000})
 
 app = FastAPI()
 
@@ -44,7 +46,7 @@ class RatingModel:
 
 # --- Sentiment Model ---
 @serve.deployment
-class FinalSentimentModel:
+class SentimentModel:
     def __init__(self):
         self.pipe = pipeline(
             "sentiment-analysis",
@@ -59,22 +61,22 @@ class FinalSentimentModel:
 # --- Pipeline ---
 @serve.deployment
 @serve.ingress(app)
-class Pipeline:
-    def __init__(self, emotion_handle, rating_handle, final_handle):
+class PredictApp:
+    def __init__(self, emotion_handle, rating_handle, sentiment_handle):
         self.emotion_handle = emotion_handle
         self.rating_handle = rating_handle
-        self.final_handle = final_handle
+        self.sentiment_handle = sentiment_handle
 
     @app.post("/predict")
     async def predict(self, request: TextRequest):
-        emotion_resp = self.emotion_handle.remote(request)
-        emotion = await emotion_resp
+        emotion_res = self.emotion_handle.remote(request)
+        emotion = await emotion_res
 
-        rating_resp = self.rating_handle.remote(request.text, emotion)
-        rating = await rating_resp
+        rating_res = self.rating_handle.remote(request.text, emotion)
+        rating = await rating_res
 
-        sentiment_resp = self.final_handle.remote(request.text, rating, emotion)
-        sentiment = await sentiment_resp
+        sentiment_res = self.sentiment_handle.remote(request.text, rating, emotion)
+        sentiment = await sentiment_res
 
         return {
             "text": request.text,
@@ -84,10 +86,16 @@ class Pipeline:
         }
 
 
-# --- Bind deployments ---
+# --- Deployments ---
 emotion_handle = EmotionModel.bind()
 rating_handle = RatingModel.bind()
-final_handle = FinalSentimentModel.bind()
-pipeline = Pipeline.bind(emotion_handle, rating_handle, final_handle)
+sentiment_handle = SentimentModel.bind()
+predict_app = PredictApp.bind(emotion_handle, rating_handle, sentiment_handle)
 
-serve.run(pipeline, blocking=True)
+try:
+    serve.run(predict_app, blocking=True)
+except KeyboardInterrupt:
+    serve.shutdown()
+    time.sleep(1)
+    ray.shutdown()
+    print("Shutdowned Ray Serve")

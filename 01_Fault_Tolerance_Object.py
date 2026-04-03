@@ -8,15 +8,12 @@ import os
 
 @ray.remote
 def create_data():
-    pid = os.getpid()
-    print(f"[{pid}] Task đang chạy...")
     return np.ones(100)
 
 
-@ray.remote
+@ray.remote(max_retries=-1)
 def cal_sum(arr):
-    time.sleep(1)
-    if random.random() <= 0.7:
+    if random.random() <= 0.9:
         os._exit(1)
     return arr.sum()
 
